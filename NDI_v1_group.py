@@ -25,8 +25,9 @@ class InteractiveRaycast:
         self.world = World()
         self.world.scene.add_default_ground_plane()
 
-        self.USD_FILE_PATH = "C:/Nick/surgery_team/surgery_team/USD/FourFill_condition.usd"
-        #"C:/Nick/surgery_team/surgery_team/USD/surgery_room.usd"
+        self.USD_FILE_PATH = "C:/Nick/surgery_team/surgery_team/USD/surgery_room.usd"
+        #"C:/Nick/surgery_team/surgery_team/USD/FourFill_condition.usd"
+        #
         self._list_available_prims()
 
         # Initialize interfaces
@@ -358,7 +359,7 @@ class InteractiveRaycast:
     '''
 
     def process_raycast_hits(self):
-        """檢查射線擊中狀態，並標示物體是否在觸發器內"""
+        """檢查射線擊中狀態，並根據標記類型分組標示物體位置"""
         if self.frame_count % 100 == 0 and self.raycast_results:
             print("\n=== 射線目標擊中狀態 ===")
             
@@ -371,11 +372,27 @@ class InteractiveRaycast:
             # 建立終點路徑到結果的映射
             end_hit_map = {}
             
+            # 建立標記組織的字典，用於分類不同類型的標記
+            marker_groups = {}
+            
             for end_path in self.end_prim_paths:
                 end_hit_map[end_path] = {
                     'hit_count': 0,
                     'total_count': 0
                 }
+                
+                # 從路徑中提取標記類型 (FM 或 HM)
+                marker_type = None
+                supported_markers = ["FM", "HM", "BM", "EM", "UM"]
+                
+                for marker in supported_markers:
+                    if marker in end_path:
+                        marker_type = marker
+                        break
+                                        
+                # 初始化標記組別
+                if marker_type not in marker_groups:
+                    marker_groups[marker_type] = []
             
             # 統計每個終點有多少射線擊中它
             for result in self.raycast_results:
@@ -388,7 +405,6 @@ class InteractiveRaycast:
                         end_hit_map[end_path]['hit_count'] += 1
             
             # 顯示每個終點的擊中率、位置，以及是否在觸發器內
-            visible_paths = []
             for end_path, stats in end_hit_map.items():
                 hit_count = stats['hit_count']
                 total = stats['total_count']
@@ -403,14 +419,20 @@ class InteractiveRaycast:
                         
                 trigger_status = "[In]" if is_in_trigger else "[Out]"
                 
-                # 只有當射線全部擊中且物體在觸發器內時，才顯示位置
+                # 只有當射線全部擊中且物體在觸發器內時，才顯示位置並加入對應標記組
                 if hit_count == total and is_in_trigger:  
                     # 獲取物體位置
+                    # 在檢查可見性條件後，修改將物體添加到對應標記組的部分
                     position = self.get_prim_position(end_path)
                     if position:
                         pos_str = f"[{position[0]:.3f}, {position[1]:.3f}, {position[2]:.3f}]"
                         print(f"{end_path} {trigger_status}: {hit_count}/{total} 射線擊中 {pos_str}")
-                        visible_paths.append(end_path)
+                        
+                        # 動態判斷並添加到對應標記組
+                        for marker in supported_markers:
+                            if marker in end_path:
+                                marker_groups[marker].append({"path": end_path, "position": position})
+                                break
                     else:
                         print(f"{end_path} {trigger_status}: {hit_count}/{total} 射線擊中 [位置未知]")
                 else:
@@ -422,21 +444,32 @@ class InteractiveRaycast:
             total_rays = sum(stats['total_count'] for stats in end_hit_map.values())
             print(f"\n總計: {total_hits}/{total_rays} 射線擊中終點")
             
-            # 如果有足夠可見球體，計算標記位置
-            if len(visible_paths) >= 3:
-                visible_positions = []
-                for path in visible_paths:
-                    pos = self.get_prim_position(path)
-                    if pos:
-                        visible_positions.append(pos)
-                
-                if visible_positions:
-                    positions = np.array(visible_positions)
-                    mean_pos = np.round(np.mean(positions, axis=0), decimals=3)
-                    print(f"\n標記位置 ({len(visible_paths)} 個可見點): {mean_pos}")
-
-                else:
-                    print(f"\n可見球體: {len(visible_paths)}，lost marker position")   
+            # 針對每個標記組分別計算並輸出標記位置
+                        # 針對每個標記組分別計算並輸出標記位置
+            print("\n=== 各標記位置 ===")
+            
+            # 定義顯示順序
+            display_order = ["FM", "HM", "BM", "EM", "UM"] 
+            
+            # 按照定義的順序遍歷標記組
+            for marker_type in display_order:
+                if marker_type in marker_groups:
+                    marker_objects = marker_groups[marker_type]
+                    if marker_objects:  # 如果該標記組有可見的球體
+                        visible_positions = []
+                        
+                        for obj in marker_objects:
+                            if obj["position"]:
+                                visible_positions.append(obj["position"])
+                        
+                        if len(visible_positions) >= 3:  # 需要至少3個點來可靠地確定位置
+                            positions = np.array(visible_positions)
+                            mean_pos = np.round(np.mean(positions, axis=0), decimals=3)
+                            print(f"{marker_type} 標記位置 ({len(visible_positions)} 個可見點): {mean_pos}")
+                        else:
+                            print(f"{marker_type} 標記: 可見點數量不足 ({len(visible_positions)})，無法可靠計算位置")
+                    else:
+                        print(f"{marker_type} 標記: 沒有可見點，lost marker position")
 
     def run(self):
         try:
